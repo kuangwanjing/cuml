@@ -53,6 +53,9 @@ import rmm
 cimport cuml.common.handle
 cimport cuml.common.cuda
 
+import time
+import os
+
 cdef extern from "cuml/cuml.hpp" namespace "ML" nogil:
     cdef cppclass deviceAllocator:
         pass
@@ -173,7 +176,7 @@ class NearestNeighbors(Base):
         algorithm : string the query algorithm to use. Currently, only
                     'brute' is supported.
         metric : string distance metric to use. (default="euclidean").
-        """
+        """ 
 
         super(NearestNeighbors, self).__init__(handle, verbose)
 
@@ -291,10 +294,27 @@ class NearestNeighbors(Base):
             raise ValueError("Dimensions of X need to match dimensions of "
                              "indices (%d)" % self.n_dims)
 
-        X_m, X_ctype, N, _, dtype = \
+        X_m, X_ctype, N, cols, dtype = \
             input_to_dev_array(X, order='F', check_dtype=np.float32,
                                convert_to_dtype=(np.float32 if convert_dtype
                                                  else None))
+        if self.algorithm == "sweet":
+            rnd_name = str( int(time.time()) )
+            file_name = "/tmp/sweetknn_input_"+rnd_name
+            output_name = "/tmp/sweetknn_output_"+rnd_name
+            X.to_csv(file_name, sep="\t", header=False, index=False)
+            num = len(X)
+            #print ("/rapids/notebooks/project/knn_sweet-master/knnjoin %d %d %d %d %d %d %s %s %s"
+            #        % (num, num, cols, 800, 800, n_neighbors, file_name, file_name, output_name))
+            os.system("/rapids/notebooks/project/knn_sweet-master/knnjoin %d %d %d %d %d %d %s %s %s"
+                    % (num, num, cols, 800, 800, n_neighbors, file_name, file_name, output_name))
+            names = []
+            for i in range(cols):
+                names.append('name_' + str(i))
+            dists = cudf.read_csv(output_name+"_dis.csv", names=names, delimiter='\t')
+            inds = cudf.read_csv(output_name+"_index.csv", names=names, delimiter='\t')
+
+            return (dists, inds)
 
         # Need to establish result matrices for indices (Nxk)
         # and for distances (Nxk)
